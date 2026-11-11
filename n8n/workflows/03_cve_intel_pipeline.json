@@ -1,0 +1,208 @@
+{
+  "name": "WardenAI — CVE Intel Pipeline",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "critical-cve",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "webhook-cve",
+      "name": "Webhook: CVE Alert Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        240,
+        300
+      ],
+      "webhookId": "critical-cve"
+    },
+    {
+      "parameters": {
+        "jsCode": "const cve = $input.first().json;\nconst cveid = cve.cve_id || cve.id || 'CVE-UNKNOWN';\nconst cvss = parseFloat(cve.cvss_score || cve.score || 0);\nconst description = cve.description || cve.summary || 'No description available';\nconst published = cve.published_date || cve.published || new Date().toISOString();\nconst affectedProducts = cve.affected_products || cve.products || [];\nconst activeExploit = cve.actively_exploited === true || cve.exploit_available === true;\nconst severity = cvss >= 9.0 ? 'CRITICAL' : cvss >= 7.0 ? 'HIGH' : cvss >= 4.0 ? 'MEDIUM' : 'LOW';\nconst emojiMap = { CRITICAL: '🚨', HIGH: '🔴', MEDIUM: '🟠', LOW: '🟡' };\nreturn [{ json: { cveid, cvss, severity, description, published, affectedProducts, activeExploit, emoji: emojiMap[severity] || '🚨', humanTime: new Date(published).toUTCString() } }];"
+      },
+      "id": "parse-cve",
+      "name": "Parse CVE Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        460,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const cve = $input.first().json;\nconst systemPrompt = 'You are a vulnerability intelligence analyst writing internal patch advisories. Output exactly four labeled sections, under 180 words total, no preamble.\\n\\n1. IMPACT — one sentence: what an attacker achieves with this CVE (RCE / privesc / info disclosure / DoS) and the prerequisites (auth required? user interaction?).\\n2. AT-RISK SYSTEMS — name the affected products and version range from the data. No general statements.\\n3. PATCH OR MITIGATION — name the fixed version OR the workaround. If no patch exists, say so and give the mitigation.\\n4. URGENCY — exactly one of: PATCH NOW / PATCH THIS WEEK / MONITOR / LOW PRIORITY. Use PATCH NOW only if active exploitation is reported or CVSS >= 9.0 with public PoC.';\nconst userPrompt = 'CVE: ' + cve.cveid + '\\nCVSS: ' + cve.cvss + ' (' + cve.severity + ')\\nPublished: ' + cve.humanTime + '\\nActive exploitation: ' + (cve.activeExploit ? 'YES' : 'No') + '\\nAffected products: ' + JSON.stringify(cve.affectedProducts) + '\\n\\n' + cve.description;\nreturn [{ json: { cve: cve, systemPrompt: systemPrompt, prompt: userPrompt } }];"
+      },
+      "id": "build-cve-prompt",
+      "name": "Build CVE Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        680,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.openai.com/v1/chat/completions",
+        "method": "POST",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.OPENAI_API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ model: 'gpt-4o-mini', max_tokens: 320, temperature: 0.2, messages: [{ role: 'system', content: $json.systemPrompt }, { role: 'user', content: $json.prompt }] }) }}",
+        "options": {}
+      },
+      "id": "call-openai-03",
+      "name": "Call OpenAI",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        900,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const analysisText = ($json.choices && $json.choices[0]) ? $json.choices[0].message.content : 'Analysis unavailable — check OpenAI API key';\nconst d = $('Build CVE Prompt').item.json.cve;\nconst exploitBadge = d.activeExploit ? '🚨 *ACTIVELY EXPLOITED*' : '';\nconst products = Array.isArray(d.affectedProducts) && d.affectedProducts.length > 0 ? d.affectedProducts.slice(0,3).join(', ') : 'See description';\nreturn [{ json: {\n  channel: $env.SLACK_CHANNEL_ID || 'general',\n  text: d.emoji + ' WardenAI CVE Alert: ' + d.cveid + ' (CVSS ' + d.cvss + ')',\n  blocks: [\n    { type: 'header', text: { type: 'plain_text', text: d.emoji + ' CVE Alert: ' + d.cveid } },\n    { type: 'section', fields: [\n      { type: 'mrkdwn', text: '*CVSS Score:*\\n' + d.cvss + ' (' + d.severity + ')' },\n      { type: 'mrkdwn', text: '*Exploit Status:*\\n' + (d.activeExploit ? '🚨 Actively Exploited' : '✅ No known exploit') },\n      { type: 'mrkdwn', text: '*Affected Products:*\\n' + products },\n      { type: 'mrkdwn', text: '*Published:*\\n' + d.humanTime }\n    ]},\n    { type: 'section', text: { type: 'mrkdwn', text: (exploitBadge ? exploitBadge + '\\n' : '') + analysisText } },\n    { type: 'divider' },\n    { type: 'context', elements: [{ type: 'mrkdwn', text: 'Source: NVD/CISA  |  WardenAI Intelligence  |  ' + d.humanTime }] }\n  ]\n}}];"
+      },
+      "id": "build-cve-slack",
+      "name": "Build Slack CVE Alert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://slack.com/api/chat.postMessage",
+        "method": "POST",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SLACK_BOT_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json; charset=utf-8"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={{ JSON.stringify($json) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "slack-cve",
+      "name": "Slack: Post CVE Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1340,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook: CVE Alert Trigger": {
+      "main": [
+        [
+          {
+            "node": "Parse CVE Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse CVE Data": {
+      "main": [
+        [
+          {
+            "node": "Build CVE Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build CVE Prompt": {
+      "main": [
+        [
+          {
+            "node": "Call OpenAI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call OpenAI": {
+      "main": [
+        [
+          {
+            "node": "Build Slack CVE Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Slack CVE Alert": {
+      "main": [
+        [
+          {
+            "node": "Slack: Post CVE Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "tags": [
+    {
+      "name": "wardenai"
+    },
+    {
+      "name": "cve"
+    },
+    {
+      "name": "intel"
+    },
+    {
+      "name": "production"
+    }
+  ],
+  "id": "wf03-cve-intel-pipeline"
+}

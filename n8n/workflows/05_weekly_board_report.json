@@ -1,0 +1,338 @@
+{
+  "name": "WardenAI — Weekly Executive Board Report",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "run-board-report",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "manual-webhook-05",
+      "name": "Manual Trigger: Board Report",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        240,
+        460
+      ],
+      "webhookId": "run-board-report"
+    },
+    {
+      "parameters": {
+        "url": "=http://host.docker.internal:8080/auth/token",
+        "method": "POST",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "username",
+              "value": "admin"
+            },
+            {
+              "name": "password",
+              "value": "wardenai2025"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "board-auth",
+      "name": "Authenticate",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        460,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=http://host.docker.internal:8080/api/v1/dashboard",
+        "method": "GET",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Authenticate').item.json.access_token }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "board-stats",
+      "name": "Fetch Dashboard Stats",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=http://host.docker.internal:8080/api/v1/incidents?limit=100&status=OPEN",
+        "method": "GET",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Authenticate').item.json.access_token }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "board-incidents",
+      "name": "Fetch Open Incidents",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        860,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const stats = $node['Fetch Dashboard Stats'].json || {};\nconst incidentData = $node['Fetch Open Incidents'].json || {};\nconst incidents = Array.isArray(incidentData) ? incidentData : (incidentData.incidents || []);\nconst critical = incidents.filter(function(i){ return i.severity === 'CRITICAL'; }).length;\nconst high = incidents.filter(function(i){ return i.severity === 'HIGH'; }).length;\nconst medium = incidents.filter(function(i){ return i.severity === 'MEDIUM'; }).length;\nconst low = incidents.filter(function(i){ return i.severity === 'LOW'; }).length;\nconst blocked = incidents.filter(function(i){ return i.block_recommended; }).length;\nconst topThreats = {};\nfor (var inc of incidents) { var t = inc.threat_type || inc.type || 'UNKNOWN'; topThreats[t] = (topThreats[t] || 0) + 1; }\nconst topThreatsStr = Object.entries(topThreats).sort(function(a,b){ return b[1]-a[1]; }).slice(0,5).map(function(e){ return e[0]+': '+e[1]; }).join(', ');\nconst summary = { total_alerts: stats.total_alerts_24h || 0, total_incidents: stats.active_incidents || incidents.length, resolved_this_week: stats.resolved_this_week || 0, blocked_ips: stats.blocked_ips || blocked, open_critical: critical, open_high: high, open_medium: medium, open_low: low, top_threats: topThreatsStr || 'None', avg_response_time: stats.avg_response_time_min || 'N/A', week_start: new Date(Date.now()-7*24*3600*1000).toISOString().slice(0,10), week_end: new Date().toISOString().slice(0,10) };\nreturn [{ json: summary }];"
+      },
+      "id": "board-aggregate",
+      "name": "Aggregate Weekly Metrics",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1060,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const metrics = $input.first().json;\nconst systemPrompt = 'You are the CISO presenting a weekly cybersecurity update to non-technical board members. Output exactly five labeled sections, total under 350 words, plain business language, no jargon, no markdown headers — just section name in CAPS then content.\\n\\n1. EXECUTIVE SUMMARY — 2 sentences: overall risk posture this week and whether it improved vs last week.\\n2. KEY THREATS — the dominant threat categories observed this week with counts. Translate technical terms (e.g., say \"command-and-control beacons\" not \"T1071.001\").\\n3. RESPONSE EFFECTIVENESS — cite the actual incident-resolved count, blocked-IP count, and average response time from the data. State whether the team is keeping up with volume.\\n4. RECOMMENDATIONS — three concrete actions the board should approve (budget, headcount, or policy). Each one tied to a specific risk seen in the data.\\n5. NEXT WEEK OUTLOOK — one sentence on the trend (escalating / steady / improving) plus what to watch for.\\n\\nUse only the values provided. If a metric is missing, say \"data unavailable\" — do not invent.';\nconst userPrompt = 'Week: ' + metrics.week_start + ' to ' + metrics.week_end + '\\n\\nMetrics:\\n- Total alerts: ' + metrics.total_alerts + '\\n- Active incidents: ' + metrics.total_incidents + '\\n- Resolved this week: ' + metrics.resolved_this_week + '\\n- Blocked IPs: ' + metrics.blocked_ips + '\\n- Open by severity: CRITICAL=' + metrics.open_critical + ' HIGH=' + metrics.open_high + ' MEDIUM=' + metrics.open_medium + ' LOW=' + metrics.open_low + '\\n- Top threats: ' + metrics.top_threats + '\\n- Avg response: ' + metrics.avg_response_time + ' min';\nreturn [{ json: { prompt: userPrompt, systemPrompt: systemPrompt, metrics: metrics } }];"
+      },
+      "id": "board-build-prompt",
+      "name": "Build Board Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1260,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.openai.com/v1/chat/completions",
+        "method": "POST",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.OPENAI_API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ model: 'gpt-4o-mini', max_tokens: 600, temperature: 0.2, messages: [{ role: 'system', content: $json.systemPrompt }, { role: 'user', content: $json.prompt }] }) }}",
+        "options": {}
+      },
+      "id": "call-openai-05",
+      "name": "Call OpenAI",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1460,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const report = ($json.choices && $json.choices[0]) ? $json.choices[0].message.content : 'Report generation failed — check OpenAI API key';\nconst metrics = $('Build Board Prompt').item.json.metrics;\nconst blocks = [{ type: 'header', text: { type: 'plain_text', text: '📊 Weekly Security Board Report', emoji: true } }, { type: 'section', text: { type: 'mrkdwn', text: '*Period:* ' + metrics.week_start + ' → ' + metrics.week_end } }, { type: 'divider' }, { type: 'section', fields: [{ type: 'mrkdwn', text: '*CRITICAL Open:* ' + metrics.open_critical }, { type: 'mrkdwn', text: '*HIGH Open:* ' + metrics.open_high }, { type: 'mrkdwn', text: '*IPs Blocked:* ' + metrics.blocked_ips }, { type: 'mrkdwn', text: '*Resolved:* ' + metrics.resolved_this_week }, { type: 'mrkdwn', text: '*Total Alerts:* ' + metrics.total_alerts }, { type: 'mrkdwn', text: '*Avg Response:* ' + metrics.avg_response_time + ' min' }] }, { type: 'divider' }, { type: 'section', text: { type: 'mrkdwn', text: report.length > 2900 ? report.slice(0,2900) + '...' : report } }, { type: 'divider' }, { type: 'context', elements: [{ type: 'mrkdwn', text: 'WardenAI · Weekly Board Report · Every Monday 8AM' }] }];\nreturn [{ json: { channel: 'C0ANVSMJTH9', text: 'Weekly Security Report: ' + metrics.week_start + ' to ' + metrics.week_end, blocks: blocks } }];"
+      },
+      "id": "board-build-slack",
+      "name": "Build Slack Board Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1660,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $input.first().json;\nconst reportId = 'board-' + new Date().toISOString().slice(0,10) + '-' + Date.now().toString(36);\nreturn [{ json: { report_id: reportId, workflow: 'board_report', title: 'Weekly Board Report — ' + new Date().toISOString().slice(0,10), slack_payload: d } }];"
+      },
+      "id": "board-build-approval",
+      "name": "Build Approval Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1860,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=http://host.docker.internal:8080/api/v1/reports/pending",
+        "method": "POST",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($json) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "board-submit-approval",
+      "name": "Submit for Approval",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2060,
+        380
+      ]
+    }
+  ],
+  "connections": {
+    "Manual Trigger: Board Report": {
+      "main": [
+        [
+          {
+            "node": "Authenticate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Authenticate": {
+      "main": [
+        [
+          {
+            "node": "Fetch Dashboard Stats",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Dashboard Stats": {
+      "main": [
+        [
+          {
+            "node": "Fetch Open Incidents",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Open Incidents": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Weekly Metrics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate Weekly Metrics": {
+      "main": [
+        [
+          {
+            "node": "Build Board Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Board Prompt": {
+      "main": [
+        [
+          {
+            "node": "Call OpenAI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call OpenAI": {
+      "main": [
+        [
+          {
+            "node": "Build Slack Board Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Slack Board Report": {
+      "main": [
+        [
+          {
+            "node": "Build Approval Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Approval Payload": {
+      "main": [
+        [
+          {
+            "node": "Submit for Approval",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "wardenai"
+    },
+    {
+      "name": "board-report"
+    },
+    {
+      "name": "slack"
+    }
+  ],
+  "triggerCount": 1,
+  "updatedAt": "2026-04-08T00:00:00.000Z",
+  "versionId": "05-weekly-board-v2",
+  "id": "wf05-weekly-board-report"
+}
