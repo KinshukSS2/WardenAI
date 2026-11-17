@@ -235,13 +235,13 @@ CREATE TABLE IF NOT EXISTS users (
 -- Hash generated with: passlib.context.CryptContext(schemes=["bcrypt"]).hash("<your-password>")
 INSERT INTO users (username, email, password_hash, role) VALUES
     ('admin', 'admin@wardenai.ai',
-     '$2b$12$KODr9Y22SHd9V8Wyi149DO5Tfj5rkedPGbgqnLU67FtIREvS5Ney6',
+     '$2b$12$shC9RPn1kQiSHzWT.F2pW.Y0Hw2QtKMLzkBKRIKrt4fGM2sHu/p5G',
      'admin')
 ON CONFLICT (username) DO NOTHING;
 
 INSERT INTO users (username, email, password_hash, role) VALUES
     ('analyst', 'analyst@wardenai.ai',
-     '$2b$12$KODr9Y22SHd9V8Wyi149DO5Tfj5rkedPGbgqnLU67FtIREvS5Ney6',
+     '$2b$12$shC9RPn1kQiSHzWT.F2pW.Y0Hw2QtKMLzkBKRIKrt4fGM2sHu/p5G',
      'analyst')
 ON CONFLICT (username) DO NOTHING;
 

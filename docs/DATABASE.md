@@ -741,7 +741,7 @@ CREATE TRIGGER trg_firewall_expires
 -- admin account — password: wardenai2025
 INSERT INTO users (username, email, password_hash, role) VALUES
     ('admin', 'admin@wardenai.ai',
-     '$2b$12$KODr9Y22SHd9V8Wyi149DO5Tfj5rkedPGbgqnLU67FtIREvS5Ney6',
+     '$2b$12$shC9RPn1kQiSHzWT.F2pW.Y0Hw2QtKMLzkBKRIKrt4fGM2sHu/p5G',
      'admin')
 ON CONFLICT (username) DO NOTHING;
 ```
