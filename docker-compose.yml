@@ -150,6 +150,7 @@ services:
       # Measured similarity for known-bad profiles: 0.43–0.55 → threshold set to 0.40
       RLM_ANOMALY_THRESHOLD: "0.40"
       RLM_THREAT_MATCH_THRESHOLD: "0.35"
+      ANONYMIZED_TELEMETRY: "False"
     networks: [wardenai-net]
     depends_on:
       kafka:
@@ -176,6 +177,7 @@ services:
       NVD_API_KEY: ${NVD_API_KEY:-}
       ABUSEIPDB_KEY: ${ABUSEIPDB_KEY:-}
       OTX_API_KEY: ${OTX_API_KEY:-}
+      ANONYMIZED_TELEMETRY: "False"
     networks: [wardenai-net]
     depends_on:
       kafka:
@@ -209,6 +211,7 @@ services:
       PAGERDUTY_KEY: ${PAGERDUTY_KEY:-}
       # Per-investigation rate limit. 10s on paid OpenAI tier (was 60s for free Gemini).
       INVESTIGATION_INTERVAL_SEC: ${INVESTIGATION_INTERVAL_SEC:-10}
+      ANONYMIZED_TELEMETRY: "False"
     networks: [wardenai-net]
     depends_on:
       kafka:
@@ -243,6 +246,7 @@ services:
       N8N_URL: ${N8N_URL:-http://host.docker.internal:5678}
       SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN:-}
       SLACK_CHANNEL_ID: ${SLACK_CHANNEL_ID:-}
+      ANONYMIZED_TELEMETRY: "False"
     networks: [wardenai-net]
     depends_on: [postgres, redis, chromadb]
     restart: unless-stopped
