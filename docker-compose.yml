@@ -247,6 +247,10 @@ services:
       SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN:-}
       SLACK_CHANNEL_ID: ${SLACK_CHANNEL_ID:-}
       ANONYMIZED_TELEMETRY: "False"
+    # Docker Desktop resolves host.docker.internal on its own; plain Docker
+    # Engine on Linux needs this mapping to reach the standalone n8n container.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks: [wardenai-net]
     depends_on: [postgres, redis, chromadb]
     restart: unless-stopped
