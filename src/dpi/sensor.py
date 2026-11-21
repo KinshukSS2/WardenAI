@@ -30,6 +30,32 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [DPI] %(levelname)s:
 logger = logging.getLogger("dpi-sensor")
 
 
+def _default_route_interface() -> Optional[str]:
+    """Linux: name of the interface holding the lowest-metric default route, or None."""
+    best = None
+    try:
+        with open("/proc/net/route") as f:
+            next(f)  # header
+            for line in f:
+                parts = line.split()
+                if len(parts) > 6 and parts[1] == "00000000":
+                    metric = int(parts[6])
+                    if best is None or metric < best[1]:
+                        best = (parts[0], metric)
+    except (OSError, StopIteration, ValueError):
+        return None
+    return best[0] if best else None
+
+
+def _link_state(iface: str) -> str:
+    """Linux: operstate of an interface ('up', 'down', 'unknown', ...)."""
+    try:
+        with open(f"/sys/class/net/{iface}/operstate") as f:
+            return f.read().strip()
+    except OSError:
+        return "unknown"
+
+
 def _detect_capture_interface() -> str:
     """
     Auto-detect the best physical interface for packet capture.
@@ -125,11 +151,23 @@ def _detect_capture_interface() -> str:
                 logger.info(f"Auto-selected Windows adapter (fallback): {iface}")
                 return iface
 
-    # Linux path — eth0/ens/enp/etc.
+    # Linux path — eth0/ens/enp/wlan/etc.
     skip_prefixes = ("lo", "br-", "veth", "docker", "virbr", "vmnet", "dummy")
-    preferred     = ("eth0", "Ethernet", "en0", "ens", "enp", "eno", "em")
+    preferred     = ("eth0", "Ethernet", "en0", "ens", "enp", "eno", "em", "wl")
     candidates    = [i for i in available
                      if not any(i.lower().startswith(p) for p in skip_prefixes)]
+
+    # The interface carrying the default route is the one that sees real traffic
+    # (e.g. Wi-Fi when the Ethernet port is unplugged), so it wins outright.
+    default_iface = _default_route_interface()
+    if default_iface in candidates:
+        logger.info(f"Auto-selected interface (default route): {default_iface}")
+        return default_iface
+
+    # Otherwise never pick a link that is down (unplugged cable) if one is up.
+    up = [i for i in candidates if _link_state(i) != "down"]
+    if up:
+        candidates = up
 
     for pref in preferred:
         for iface in candidates:
