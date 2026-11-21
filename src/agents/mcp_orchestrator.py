@@ -802,7 +802,15 @@ class MCPOrchestrator:
         self.chroma_client = None
         self.db_pool = None
         self.redis = None
-        self.llm_provider = get_provider()
+        # Without an LLM key the orchestrator keeps running in degraded mode:
+        # alerts are still logged and stored as pending incidents, and the
+        # backlog is investigated once a key is configured and the service restarts.
+        try:
+            self.llm_provider = get_provider()
+        except RuntimeError as e:
+            self.llm_provider = None
+            logger.warning(f"⚠️  AI investigation disabled: {e}. "
+                           f"Alerts will be stored as pending incidents.")
         self.executor: Optional[MCPToolExecutor] = None
         self.investigate_agent: Optional[InvestigateAgent] = None
         self.producer: Optional[AIOKafkaProducer] = None
@@ -838,7 +846,7 @@ class MCPOrchestrator:
         await self.producer.start()
 
         self.executor = MCPToolExecutor(self.chroma_client, self.db_pool, self.redis)
-        self.investigate_agent = InvestigateAgent(self.executor)
+        self.investigate_agent = InvestigateAgent(self.executor) if self.llm_provider else None
 
         logger.info("✅ All agents initialized — starting orchestration")
 
@@ -925,7 +933,7 @@ class MCPOrchestrator:
                 # Queue empty — drain pending backlog independently of the main rate limiter
                 now = _time.time()
                 backlog_interval = float(os.getenv("BACKLOG_INTERVAL_SEC", "30"))
-                if now - self._last_backlog_at >= backlog_interval:
+                if self.investigate_agent and now - self._last_backlog_at >= backlog_interval:
                     processed = await self._reinvestigate_pending()
                     if processed:
                         self._last_backlog_at = _time.time()
@@ -936,6 +944,11 @@ class MCPOrchestrator:
             # immediately without consuming an investigation rate-limit slot — this
             # prevents a flood of paused DPI alerts from blocking simulator alerts.
             source = alert.get("source", "dpi")
+            if self.investigate_agent is None:
+                # No LLM configured — surface the alert without AI analysis.
+                await self._log_alert(alert)
+                await self._create_pending_incident(alert)
+                continue
             pause_key = f"investigations:paused:{source}"
             if await self.redis.exists(pause_key):
                 logger.info(f"⏸️  Investigations paused [{source}] — creating pending incident")
