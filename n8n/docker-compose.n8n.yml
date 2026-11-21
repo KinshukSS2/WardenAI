@@ -8,9 +8,8 @@ version: "3.9"
 #   docker compose -f docker-compose.yml -f n8n/docker-compose.n8n.yml up -d
 # ─────────────────────────────────────────────────────────────────────────────
 
-networks:
-  wardenai-net:
-    external: true
+# Paths and the wardenai-net network resolve against the base docker-compose.yml,
+# so the network is shared with the core services (not declared external here).
 
 volumes:
   n8n_data:
@@ -89,12 +88,14 @@ services:
     volumes:
       - n8n_data:/home/node/.n8n
       - ./n8n/workflows:/home/node/.n8n/workflows:ro   # Pre-load workflows
-      - ./n8n/credentials:/home/node/.n8n/credentials:ro
+    # Workflows call the API at host.docker.internal:8080
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks: [wardenai-net]
     depends_on:
       n8n-postgres:
         condition: service_healthy
-      wardenai-api:
+      api-gateway:
         condition: service_started
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:5678/healthz"]
@@ -129,8 +130,8 @@ services:
   # ─────────────────────────────────────────
   n8n-kafka-bridge:
     build:
-      context: ..
-      dockerfile: n8n/Dockerfile.bridge
+      context: .
+      dockerfile: n8n/bridge/Dockerfile.bridge
     container_name: wardenai-n8n-bridge
     restart: unless-stopped
     environment:
